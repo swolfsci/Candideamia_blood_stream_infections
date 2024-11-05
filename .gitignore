@@ -1,0 +1,58 @@
+# R Studio files
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+
+# Source files
+src/*
+*.so
+*.o
+*.dll
+*.xlsx
+/
+*.lnk
+
+# R Environment Variables
+.Renviron
+.Rprofile
+
+# R package build files
+*.tar.gz
+*.Rcheck/
+
+# Data files (uncomment if needed)
+#*.csv
+#*.tsv
+#*.rds
+#*.rda
+#*.RData
+
+# Output files
+*.html
+*.pdf
+*.doc
+*.docx
+*.png
+*.ai
+
+# Temporary files
+*~
+.DS_Store
+Thumbs.db
+*.tmp
+
+# Logs
+*.log
+
+# Compiled code
+*.exe
+*.out
+
+# R markdown cache
+*_cache/
+*_files/
+.Rdata
+.httr-oauth
+.quarto

@@ -1,0 +1,436 @@
+---
+title: "Epidemiology and outcome of candida blood stream infections in cancer patients, a comparative retrospective study"
+author: "Sebastian Wolf"
+toc: true
+format:
+  html:
+    theme: litera
+    self-contained: true
+    code-fold: true
+knitr:
+  opts_chunk:
+    message: false
+    warning: false
+---
+
+# Abstract
+
+Abstract
+Background: Candida blood stream infections (BSI) in cancer patients are an important source of morbidity and mortality. While the widespread use of antifungal prophylaxis has led to a decline in the overall incidence, insights about the clinical course, risk factors and outcomes of candida blood stream infections are important. Moreover, direct comparisons of risk factors and outcomes of candida BSI to bacterial BSI are lacking. 
+Methods: In this single-center, comparative retrospective study conducted	in a tertiary cancer center in Germany, we compared outcomes of 29 candida BSI events to 608 bacterial BSI events in a study population of 403 patients mainly with hematological cancers. Furthermore, we identified risk factors and therapy sequence in candida BSI.  
+Results: Patients with candida BSI had a significantly poorer 30 day overall survival (HR 4.5, 95% CI 2.5 – 8.1, p <0.001) compared to bacterial BSI events. When stratified for bacterial taxonomy and drug resistance, mortality with candida BSI ranked second after that with bacterial BSI with multi-drug resistant gram-negative organisms with carbapenem resistance (MDRGNO + CR, univariate HR for 30 day OS 8.1, 95% CI 4.3 – 15.3, p < 0.001). Candida BSI events were exclusively nosocomial and occurred most frequently in patients undergoing palliative treatment for relapsed or refractory disease.     
+Conclusion: When compared to bacterial BSI events, candida BSI carry significant 30 day mortality and occur predominantly in heavily pretreated patients with relapsed or refractory disease. 
+
+This code base includes all analyses required for the Wolf et al. paper. 
+
+# Data loading and endpoint calculations
+
+As the primary analysis endpoint, we define 30-day mortality after BSI event and compare Candida BSI vs. bacterial BSI.
+For this, we calculate the follow-up in days after initial BSI detection and cap it at 30 days. Subsequently, those who die within this time period are identified as deceased; all events after 30 days are censored.
+
+```{r}
+library(tidyverse)
+
+candida_data <- readxl::read_excel("200606 - alloTx BSI und Candidämie.xlsx",sheet = "R formatiert")
+
+candida_data %>% 
+  mutate(datum_bsi_letztnachweis = as.numeric(datum_bsi_letztnachweis), 
+         datum_bsi_letztnachweis = janitor::excel_numeric_to_date(datum_bsi_letztnachweis),
+         zeitspanne_bsi_erst_letztnachweis = lubridate::time_length(interval(Datum_BSI_Erstnachweis, datum_bsi_letztnachweis), unit = "days")) %>% 
+  relocate(zeitspanne_bsi_erst_letztnachweis, .after = datum_bsi_letztnachweis) %>% 
+  mutate(candidemia = ifelse(Genus_Erreger_BSI == "Candida", "cand", "bak"),
+         candidemia_diff = case_when(
+           candidemia == "cand" & `1A_Erreger_Klassifikation` == "Cand_alb" ~ "cand_alb",
+           candidemia == "cand" & `1A_Erreger_Klassifikation` == "Cand_nonalb" ~ "cand_nonalb",
+          TRUE ~ "bac"
+         ),
+         icu_imc_30d_post_bsi = factor(icu_imc_30d_post_bsi, levels=c("ja", "nein")),
+         krea_high = Krea_bei_BSI > Krea_upper_limit,
+         tod_kombiniert = case_when(
+           vermutlich_verstorben == 1 ~ 1,
+           TRUE ~ tod
+         ),
+         dauer_aufnahme_bis_bsi = lubridate::time_length(interval(aufnahme, Datum_BSI_Erstnachweis), unit = "days"),
+         thrombopenie = thrombos < 150,
+         hypoalbuminemia = albumin < 3.5,
+         candidemia_fac = candidemia == "cand", 
+         ucci_high = updated_cci > 2,
+         mutate(across(.cols = c(szt_bis_d100, post_szt), ~ ifelse(!is.na(.), ., "nein"))),
+         across(.cols = c(DM:Lunge, hospitalisierung_prior_30d, hospitalisierung_prior_90d, icu_imc_prior_90d, icu_imc_während_bsi, icu_imc_bei_sepsis_30d_post_bsi, zentralvenöser_katheter, parenterale_ernährung, immunsuppression_während_bsi, chemo_prior_30d, schwere_mukositis), ~ fct_relevel(., "nein", after = 0)))-> candida_data
+```
+
+
+
+```{r}
+candida_data %>% 
+  mutate(FU_tage = lubridate::time_length(interval(Datum_BSI_Erstnachweis, letztes_fu), unit = "days"),
+         FU_tage_capped_30 = ifelse(FU_tage > 30, 30, FU_tage),
+         tod_event_binnen_30 = case_when(
+           FU_tage <= 30 & tod_kombiniert == 1 ~ 1,
+           TRUE ~ 0
+         ),
+         name_vorname = paste(Name, Vorname, sep= "_")) -> candida_data
+```
+
+Patients sometimes have multiple BSI events. To avoid biases, patients with Candida BSI are only analyzed with this event and any additional BSI events are ignored.
+
+```{r}
+candida_data %>% 
+  filter(candidemia == "cand") -> candidemia_patients
+
+
+candida_data %>% 
+  filter(candidemia == "bak" & !name_vorname %in% candidemia_patients$name_vorname) %>%
+  bind_rows(candidemia_patients) -> candida_data.filtered
+
+```
+
+# Results
+
+## Table 1 Patient Demographics and Disease Characteristics
+
+We define the patient-specific variables
+
+```{r}
+tableone::CreateTableOne(data = distinct(candida_data.filtered, name_vorname, .keep_all =T), vars = c("Geschlecht", "Alter_Jahre", "Disease"), strata = "candidemia", addOverall = T) %>% 
+  print() %>% 
+  clipr::write_clip()
+```
+
+## Table S1 Microbial Isolates in Bacterial and Fungal BSI
+
+```{r}
+# bacterial BSI
+# merge ROs
+filter(candida_data.filtered, candidemia != "cand") %>% 
+  mutate(`2A_Erreger_Klassifikation` = ifelse(stringr::str_starts(`2A_Erreger_Klassifikation`, "RO"), "RO", `2A_Erreger_Klassifikation`)) %>% 
+  rstatix::freq_table(`2A_Erreger_Klassifikation`) %>% 
+  arrange(desc(prop)) 
+
+# candida BSI
+filter(candida_data.filtered, candidemia == "cand") %>% 
+  rstatix::freq_table(Erreger_BSI) %>% 
+  arrange(desc(prop))
+
+
+```
+
+## Table 2 Comparison of clinical and disease-associated factors between bacterial and Candida BSI events
+
+
+```{r}
+table_vars <- c("dauer_aufnahme_bis_bsi","Status_der_Erkrankung", "Therapieansatz", "Therapielinie", "szt_bis_d100", "post_szt", "DM", "HIV", "Leber", "Niere","Herz", "Lunge", "hospitalisierung_prior_30d", "hospitalisierung_prior_90d", "icu_imc_prior_90d","icu_imc_während_bsi", "icu_imc_bei_sepsis_30d_post_bsi", "zentralvenöser_katheter", "steroide_während_bsi", "parenterale_ernährung","immunsuppression_während_bsi", "chemo_prior_30d", "schwere_mukositis", "CRP_at_BSI", "krea_high", "albumin", "quick")
+```
+
+```{r}
+tableone::CreateTableOne(data = candida_data.filtered, vars = table_vars, strata = "candidemia", addOverall = T)
+```
+
+
+## Figure 1. Overall 30-day survival and mortality risk following bloodstream infections    
+
+### Figure 1A
+
+```{r}
+coxph(Surv(FU_tage_capped_30, tod_event_binnen_30) ~ candidemia, candida_data.filtered) %>% summary()
+```
+
+
+```{r}
+library(survival)
+library(survminer)
+
+
+ggsurvplot(survfit(Surv(FU_tage_capped_30, tod_event_binnen_30) ~ candidemia, candida_data.filtered), 
+           pval = T,
+           risk.table = T, 
+           palette = "grey", 
+           linetype = "strata", 
+           conf.int = F, 
+           title = "30 Days Overall Survival", 
+           legend.labs = c("Bacterial BSI", "Candida BSI"), 
+           axes.offset = F)
+
+#cowplot::plot_grid(plotlist=list(ggplot.out$plot, ggplot.out$table), ncol = 1, nrow = 2, align = "hv") -> ggplot.out
+```
+
+### Figure 1B
+
+We merge any Candida
+
+```{r}
+candida_data.filtered %>% 
+  mutate(`2A_Erreger_Klassifikation` = ifelse(candidemia == "cand", "Cand", `2A_Erreger_Klassifikation`),
+         `2A_Erreger_Klassifikation` = ifelse(`1A_Erreger_Klassifikation` == "RO", "RO", `2A_Erreger_Klassifikation`)) -> candida_data.filtered
+```
+
+We further merge based on antibiotica-resistance profile into MDRO + CR (in Germany "4MRGN"), MDRGN (in Germany "3MRGN") and VRE
+
+```{r}
+# identify 4 MRGN
+table("4MRGN-Status" = candida_data.filtered$"3A_MRE_Erreger_Klassifikation" == "4MRGN", "Resistenz-Status"= (candida_data.filtered$Imipenem == "R" | candida_data.filtered$Meropenem == "R") & candida_data.filtered$"Gram-Färbung" == "gneg")
+```
+
+
+```{r}
+# identify CR
+candida_data.filtered %>% 
+  filter((Imipenem == "R" |Meropenem == "R") & `3A_MRE_Erreger_Klassifikation` != "4MRGN" & `Gram-Färbung` == "gneg") %>% 
+  dplyr::select(Erreger_BSI:`3A_MRE_Erreger_Klassifikation`) %>% 
+  DT::datatable(filter = "top", options = list(autoWidth = F, scrollX = T), class = "compact hover row-border stripe dt-left cell-border nowrap")
+```
+
+we settle on the definitions 
+- MDRO + CR = 4MRGN | 3MRGN + CR
+- 3MRGN = 3MRGN without the 3MRGN + CR
+- VRE
+
+```{r}
+candida_data.filtered %>% 
+  mutate(`2A_Erregerklassifikation_mit_MDRO_CR` = case_when(
+    candidemia == "cand" ~ "Cand",
+    `3A_MRE_Erreger_Klassifikation` == "4MRGN" |(`3A_MRE_Erreger_Klassifikation` == "3MRGN" & (Imipenem == "R" |Meropenem == "R")) ~ "MRDGN_CR",
+    `3A_MRE_Erreger_Klassifikation` == "3MRGN" & !(`3A_MRE_Erreger_Klassifikation` == "4MRGN" |(`3A_MRE_Erreger_Klassifikation` == "3MRGN" & (Imipenem == "R" |Meropenem == "R"))) ~ "MDRGN",
+    `3A_MRE_Erreger_Klassifikation` == "VRE" ~ "VRE", 
+    TRUE ~ `2A_Erreger_Klassifikation`)) -> candida_data.filtered
+
+candida_data.filtered %>% 
+  mutate(`2A_Erregerklassifikation_mit_MDRO_CR` = case_when(stringr::str_detect(`2A_Erregerklassifikation_mit_MDRO_CR`, "RO") ~ "RO",
+                                                            TRUE ~ `2A_Erregerklassifikation_mit_MDRO_CR`)) -> candida_data.filtered
+```
+
+we calculate univariate HRs for each bacterial category 
+
+```{r}
+erreger <- unique(candida_data.filtered$"2A_Erregerklassifikation_mit_MDRO_CR")
+
+sapply(erreger, simplify = F,FUN = function(erreger) {
+  candida_data.filtered %>% 
+    mutate(is_erreger = factor(`2A_Erregerklassifikation_mit_MDRO_CR` == erreger)) %>% 
+    {
+      coxph(Surv(FU_tage_capped_30, tod_event_binnen_30) ~ is_erreger,.)
+    } %>% 
+    summary() -> out
+  
+  return(tibble(HR = out[[7]][[2]],
+                lower = out[[8]][[3]],
+                upper = out[[8]][[4]],
+                pval = out[[7]][[5]]))
+  
+  
+})  %>% 
+  bind_rows() -> coxph.out
+
+coxph.out$erreger <- erreger
+
+coxph.out <- rstatix::add_significance(coxph.out, p.col = "pval")
+```
+
+and plot them as an ranked dot plot with CIs
+
+```{r}
+coxph.out %>% 
+  filter(!erreger %in% c("RO_GN", "RO_Anaer")) %>% 
+  ggplot(aes(x=fct_reorder(erreger, HR), y = HR)) +
+  geom_errorbar(aes(x = fct_reorder(erreger,HR), ymin = lower, ymax = upper), width = 0.3) +
+  geom_point(size = 2) +
+  geom_text(y = 15, aes(label = paste0("HR ", round(HR, 2), " ", pval.signif))) + 
+  coord_flip() +
+  cowplot::theme_cowplot() +
+  ggtitle("univariate Modelle OS mit MDRGN-Subgruppen") + 
+  labs(x = "")
+```
+
+
+
+## Figure S1 30-day overall survival following bloodstream infection, comparing Candida albicans and non-albicans species, and bacteria
+
+```{r}
+
+ggsurvplot(survfit(Surv(FU_tage_capped_30, tod_event_binnen_30) ~ candidemia_diff, mutate(candida_data.filtered, candidemia_diff = fct_relevel(candidemia_diff, c("bac", "cand_alb", "cand_nonalb")))), 
+           pval = T,
+           risk.table = T, 
+           palette = "grey", 
+           linetype = "strata", 
+           conf.int = F, 
+           title = "30 Days Overall Survival", 
+           legend.labs = c("Bacterial BSI", "Candida non-albicans BSI", "Candida albicans BSI"), 
+           axes.offset = F) 
+
+#cowplot::plot_grid(plotlist=list(ggplot.out$plot, ggplot.out$table), ncol = 1, nrow = 2, align = "hv") -> ggplot.out
+#ggsave(ggplot.out, filename = "fig_s1.pdf", device = "pdf")
+```
+
+
+## Table 3 Uni- and multivariate logistic regression for risk of Candida BSI
+
+### Univariate
+
+We identify any features that are significantly different between Candida and bacterial BSIs. We then dummy code them for use as an binary predictor.
+
+```{r}
+risk_vars <- c("Status_der_Erkrankung", "Therapieansatz", "Therapielinie", "szt_bis_d100", "post_szt", "nosokomiale_bsi", "hospitalisierung_prior_30d", "hospitalisierung_prior_90d", "icu_imc_prior_90d", "Neutropen", "schwere_mukositis", "parenterale_ernährung", "zentralvenöser_katheter", "zvk", "port", "thrombopenie", "hypoalbuminemia", "ucci_high", "immunsuppression_während_bsi")
+
+candida_data.filtered %>% 
+  dplyr::select(all_of(risk_vars), candidemia_fac) %>% 
+  fastDummies::dummy_cols(remove_selected_columns = T, select_columns = c("Status_der_Erkrankung", "Therapielinie", "post_szt", "szt_bis_d100"), ignore_na = T) -> candida_data.filtered.logit
+```
+
+We then vectorize an logit fit over each identified risk factor with Candida BSI as binary outcome, extract the model parameters and build a Forest plot. 
+
+```{r}
+rf <- colnames(candida_data.filtered.logit)[colnames(candida_data.filtered.logit) != "candidemia_fac"]
+
+sapply(rf, FUN = function(rf) {
+  glm.out <- glm(as.formula(paste("candidemia_fac  ", rf, sep = "~")), family = "binomial", data = candida_data.filtered.logit)
+  return(bind_cols(as_tibble(coef(glm.out), rownames = "term"), 
+                   as_tibble(summary(glm.out)$coefficients[,"Pr(>|z|)"]), 
+                   as_tibble(confint(glm.out))) %>% 
+           magrittr::set_colnames(c("term", "coef", "pval", "lower", "upper")))
+}, simplify = F, USE.NAMES = T) -> logits.out
+
+do.call(rbind, logits.out) %>% 
+  filter(term != "(Intercept)") %>% 
+  mutate(HR = exp(coef), HR_lower = exp(lower), HR_upper = exp(upper)) %>% 
+  mutate(HR_upper = ifelse(term == "hypoalbuminemiaTRUE", 10, HR_upper)) %>% 
+  filter(pval < 0.1) %>% 
+  rstatix::add_significance(p.col = "pval") %>% 
+  ggplot(aes(x=fct_reorder(term, HR), y = HR)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = HR_lower, ymax = HR_upper), width = 0.2) +
+  geom_hline(yintercept = 1) + 
+  coord_flip() +
+  cowplot::theme_cowplot() +
+  geom_text(y = 10, aes(label = pval.signif))
+
+# do.call(rbind, logits.out) %>%
+#   filter(term != "(Intercept)") %>%
+#   mutate(HR = exp(coef), HR_lower = exp(lower), HR_upper = exp(upper)) %>%
+#   mutate(HR_upper = ifelse(term == "hypoalbuminemiaTRUE", 10, HR_upper)) %>%
+#   filter(pval < 0.1) %>%
+#   rstatix::add_significance(p.col = "pval") %>%
+#   writexl::write_xlsx("univariate_models.xlsx")
+
+```
+
+### Multivariate
+
+We then include all significant (p<0.1) predictors into a multivariate model and create a Forest plot. 
+
+```{r}
+do.call(rbind, logits.out) %>% 
+  filter(term != "(Intercept)") %>% 
+  mutate(HR = exp(coef), HR_lower = exp(lower), HR_upper = exp(upper)) %>% 
+  filter(pval < 0.1) %>% 
+  pull(term) -> terms_for_multivariate
+```
+
+```{r}
+candida_data.filtered.logit %>% 
+  dplyr::select(all_of(stringr::str_remove(terms_for_multivariate, "palliativ|TRUE|ja")), candidemia_fac) %>% 
+  {
+    glm(candidemia_fac ~ ., data = ., family = "binomial")
+  } %>% summary() %>% 
+  .$coefficients %>% 
+  as_tibble(rownames = "term") %>% 
+  filter(term != "(Intercept)") %>% 
+  arrange(desc(exp(Estimate))) %>% 
+  DT::datatable(filter = "top", options = list(autoWidth = F, scrollX = T), class = "compact hover row-border stripe dt-left cell-border nowrap")
+
+
+candida_data.filtered.logit %>%
+  dplyr::select(all_of(stringr::str_remove(terms_for_multivariate, "palliativ|TRUE|ja")), candidemia_fac) %>%
+  {
+    glm(candidemia_fac ~ ., data = ., family = "binomial")
+  } %>%
+  {
+    bind_cols(as_tibble(coef(.), rownames = "term"),
+                   as_tibble(summary(.)$coefficients[,"Pr(>|z|)"]),
+                   as_tibble(confint(.))) %>%
+      magrittr::set_colnames(c("term", "coef", "pval", "lower", "upper"))
+  } %>%
+  filter(term != "(Intercept)") %>%
+  mutate(HR = exp(coef), HR_lower = exp(lower), HR_upper = exp(upper)) %>%
+  filter(pval <= 0.05) %>%
+  rstatix::add_significance(p.col = "pval") %>%
+  writexl::write_xlsx("multivariate_models.xlsx")
+```
+
+
+## Figure 2 Treatment sequences in patients with Candida bloodstream infections
+
+We visualize the therapeutic sequences into a swimmers plot-style figure. 
+
+```{r}
+swimmer_data <- readxl::read_excel("200606 - alloTx BSI und Candidämie.xlsx", sheet = "therapie_vereinfacht_swimmer") %>% 
+  janitor::clean_names()
+
+set_col <- function(cand) {
+  case_when(cand == "Candida albicans" ~ "#FF8C00",
+            cand == "Candida glabrata" ~ "#FF1A1A",
+            TRUE ~ "#FFD700")
+}
+
+swimmer_data %>% 
+  left_join(dplyr::select(candida_data.filtered.cand, Datum_BSI_Erstnachweis, FU_tage_capped_30, tod_event_binnen_30), by=c("datum_bsi_erstnachweis" = "Datum_BSI_Erstnachweis")) %>% 
+  rowid_to_column("patID") %>% 
+  mutate(patID = as.factor(patID), 
+         patID = fct_reorder(patID, FU_tage_capped_30)) %>% 
+  mutate(seg_zwei = ifelse(FU_tage_capped_30 < 4, NA_character_, seg_zwei),
+         seg_drei = ifelse(FU_tage_capped_30 < 6, NA_character_, seg_drei),
+         tod_event_binnen_30 = case_when(FU_tage_capped_30 < 30 & tod_event_binnen_30 == 1 ~ "dead",
+                                         FU_tage_capped_30 < 30 & tod_event_binnen_30 == 0 ~ "lost_to_FU", 
+                                         TRUE ~ "alive"),
+         FU_tage_capped_30 = ifelse(FU_tage_capped_30 < 6, 0, FU_tage_capped_30 - 6),
+         across(.cols = starts_with("seg"), ~ as.factor(.)),
+         tod_event_binnen_30 = as.factor(tod_event_binnen_30),
+         erreger_bsi = case_when(erreger_bsi == "Candida albicans" ~ "Candida albicans",
+                                 erreger_bsi == "Candida glabrata" ~ "Candida glabrata",
+                                 TRUE ~ "other")) %>% 
+  ggplot(aes(x=patID, xend = patID)) +
+  geom_segment(y = -2, yend = 0, aes(col = seg_proph), linewidth = 3, linejoin = "round", lineend = "round") +
+  geom_segment(y = 0, yend = 2, aes(col = seg_eins), linewidth = 3) + 
+  geom_segment(y = 2, yend = 4, aes(col = seg_zwei), linewidth = 3) +
+  geom_segment(y = 4, yend = 6, aes(col = seg_drei), linewidth = 3) +
+  geom_segment(y = 6, aes(yend = 6+(FU_tage_capped_30*0.3)), col = "darkgreen", linewidth = 3) +
+  ylim(c(-2,15)) +
+  scale_colour_manual(name = "30 day OS", 
+                        values = c("Caspofungin" = "#E63946",
+                                   "Fluconazol" = "#4EA8DE",
+                                   "nein" = "#808080",
+                                   "Posaconazol" = "#FFB703",
+                                   "Voriconazol" = "#2A9D8F",
+                                   "Ambisome" = "#9D4EDD",
+                                   "Candida albicans" = "#FF8C00",
+                                   "Candida glabrata" = "#FF1A1A",
+                                   "other" = "#FFD700"
+                                   ), na.value = "white") +
+  geom_hline(linetype = "dashed", yintercept = 0) +
+  geom_point(aes(y = 6+(FU_tage_capped_30*0.3), shape = tod_event_binnen_30)) +
+  scale_shape_manual(name = "death event", values = c("alive" = 17, 
+                                                      "dead" = 4,
+                                                      "lost_to_FU" = 5)) +
+  coord_flip() +
+  cowplot::theme_cowplot() +
+  labs(x="", y = "Pat ID") +
+  geom_point(y = -2, aes(col = as.factor(erreger_bsi), x=patID), inherit.aes = F) -> plot.out
+
+ggsave(plot.out, filename = "swimmer_plot.pdf", dpi = 300, height = 10, width = 12, device = "pdf")
+```
+
+and we test if there are any statistically significant associations between early death (<30 days) and early vs. delayed therapy initiation. 
+
+```{r}
+swimmer_data %>% 
+  left_join(dplyr::select(candida_data.filtered.cand, Datum_BSI_Erstnachweis, FU_tage_capped_30, tod_event_binnen_30), by=c("datum_bsi_erstnachweis" = "Datum_BSI_Erstnachweis")) %>% 
+  mutate(early_death = FU_tage_capped_30 < 30 & tod_event_binnen_30 == 1,
+         prophylaxis = seg_proph != "nein",
+         prophylaxis_or_early_therapy = seg_proph != "nein" | seg_eins != "nein",
+         prophylaxis_and_early_therapy = seg_proph != "nein" & seg_eins != "nein",
+         early_therapy = seg_eins != "nein") %>% 
+  rstatix::freq_table(early_death, early_therapy)
+  
+```
+
+
+
