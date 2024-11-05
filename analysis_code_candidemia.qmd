@@ -289,19 +289,19 @@ sapply(rf, FUN = function(rf) {
            magrittr::set_colnames(c("term", "coef", "pval", "lower", "upper")))
 }, simplify = F, USE.NAMES = T) -> logits.out
 
-do.call(rbind, logits.out) %>% 
-  filter(term != "(Intercept)") %>% 
-  mutate(HR = exp(coef), HR_lower = exp(lower), HR_upper = exp(upper)) %>% 
-  mutate(HR_upper = ifelse(term == "hypoalbuminemiaTRUE", 10, HR_upper)) %>% 
-  filter(pval < 0.1) %>% 
-  rstatix::add_significance(p.col = "pval") %>% 
-  ggplot(aes(x=fct_reorder(term, HR), y = HR)) +
-  geom_point() +
-  geom_errorbar(aes(ymin = HR_lower, ymax = HR_upper), width = 0.2) +
-  geom_hline(yintercept = 1) + 
-  coord_flip() +
-  cowplot::theme_cowplot() +
-  geom_text(y = 10, aes(label = pval.signif))
+# do.call(rbind, logits.out) %>% 
+#   filter(term != "(Intercept)") %>% 
+#   mutate(HR = exp(coef), HR_lower = exp(lower), HR_upper = exp(upper)) %>% 
+#   mutate(HR_upper = ifelse(term == "hypoalbuminemiaTRUE", 10, HR_upper)) %>% 
+#   filter(pval < 0.1) %>% 
+#   rstatix::add_significance(p.col = "pval") %>% 
+#   ggplot(aes(x=fct_reorder(term, HR), y = HR)) +
+#   geom_point() +
+#   geom_errorbar(aes(ymin = HR_lower, ymax = HR_upper), width = 0.2) +
+#   geom_hline(yintercept = 1) + 
+#   coord_flip() +
+#   cowplot::theme_cowplot() +
+#   geom_text(y = 10, aes(label = pval.signif))
 
 # do.call(rbind, logits.out) %>%
 #   filter(term != "(Intercept)") %>%
