@@ -1,4 +1,4 @@
-_Epidemiology and outcome of candida blood stream infections in cancer patients, a comparative retrospective study_
+**Epidemiology and outcome of candida blood stream infections in cancer patients, a comparative retrospective study**
 
 *Background*: 
 Candida blood stream infections (BSI) in cancer patients are an important source of morbidity and mortality. While the widespread use of antifungal prophylaxis has led to a decline in the overall incidence, insights about the clinical course, risk factors and outcomes of candida blood stream infections are important. Moreover, direct comparisons of risk factors and outcomes of candida BSI to bacterial BSI are lacking. 
