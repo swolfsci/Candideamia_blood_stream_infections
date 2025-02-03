@@ -93,8 +93,7 @@ We define the patient-specific variables
 
 ```{r}
 tableone::CreateTableOne(data = distinct(candida_data.filtered, name_vorname, .keep_all =T), vars = c("Geschlecht", "Alter_Jahre", "Disease"), strata = "candidemia", addOverall = T) %>% 
-  print() %>% 
-  clipr::write_clip()
+  print(nonnormal = c("Geschlecht", "Alter_Jahre", "Disease"), exact =c("Geschlecht", "Alter_Jahre", "Disease")) 
 ```
 
 ## Table S1 Microbial Isolates in Bacterial and Fungal BSI
@@ -123,7 +122,7 @@ table_vars <- c("dauer_aufnahme_bis_bsi","Status_der_Erkrankung", "Therapieansat
 ```
 
 ```{r}
-tableone::CreateTableOne(data = candida_data.filtered, vars = table_vars, strata = "candidemia", addOverall = T)
+tableone::CreateTableOne(data = candida_data.filtered, vars = table_vars, strata = "candidemia", addOverall = T) %>% print(nonnormal = table_vars, exact = table_vars)
 ```
 
 
@@ -133,6 +132,10 @@ tableone::CreateTableOne(data = candida_data.filtered, vars = table_vars, strata
 
 ```{r}
 coxph(Surv(FU_tage_capped_30, tod_event_binnen_30) ~ candidemia, candida_data.filtered) %>% summary()
+```
+
+```{r}
+coxph(Surv(FU_tage_capped_30, tod_event_binnen_30) ~ ., dplyr::select(candida_data.filtered, FU_tage_capped_30, tod_event_binnen_30, all_of(univariat_signifikant), candidemia)) %>% summary()
 ```
 
 
@@ -163,6 +166,9 @@ candida_data.filtered %>%
   mutate(`2A_Erreger_Klassifikation` = ifelse(candidemia == "cand", "Cand", `2A_Erreger_Klassifikation`),
          `2A_Erreger_Klassifikation` = ifelse(`1A_Erreger_Klassifikation` == "RO", "RO", `2A_Erreger_Klassifikation`)) -> candida_data.filtered
 ```
+
+
+## Figure 2
 
 We further merge based on antibiotica-resistance profile into MDRO + CR (in Germany "4MRGN"), MDRGN (in Germany "3MRGN") and VRE
 
@@ -240,6 +246,13 @@ coxph.out %>%
   ggtitle("univariate Modelle OS mit MDRGN-Subgruppen") + 
   labs(x = "")
 ```
+## Table S2
+
+```{r}
+coxph.out %>% 
+  arrange(desc(HR)) %>% 
+  writexl::write_xlsx("tables2_hr_per_isolate.xlsx")
+```
 
 
 
@@ -292,7 +305,7 @@ sapply(rf, FUN = function(rf) {
 # do.call(rbind, logits.out) %>% 
 #   filter(term != "(Intercept)") %>% 
 #   mutate(HR = exp(coef), HR_lower = exp(lower), HR_upper = exp(upper)) %>% 
-#   mutate(HR_upper = ifelse(term == "hypoalbuminemiaTRUE", 10, HR_upper)) %>% 
+#   #mutate(HR_upper = ifelse(term == "hypoalbuminemiaTRUE", 10, HR_upper)) %>% 
 #   filter(pval < 0.1) %>% 
 #   rstatix::add_significance(p.col = "pval") %>% 
 #   ggplot(aes(x=fct_reorder(term, HR), y = HR)) +
@@ -357,7 +370,7 @@ candida_data.filtered.logit %>%
 ```
 
 
-## Figure 2 Treatment sequences in patients with Candida bloodstream infections
+## Figure 3 Treatment sequences in patients with Candida bloodstream infections
 
 We visualize the therapeutic sequences into a swimmers plot-style figure. 
 
