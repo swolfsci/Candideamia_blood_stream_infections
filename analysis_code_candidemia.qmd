@@ -167,7 +167,7 @@ candida_data.filtered %>%
          `2A_Erreger_Klassifikation` = ifelse(`1A_Erreger_Klassifikation` == "RO", "RO", `2A_Erreger_Klassifikation`)) -> candida_data.filtered
 ```
 
-## Table S1
+## Table S2
 
 ```{r}
 survfit(Surv(FU_tage_capped_30, tod_event_binnen_30) ~ candidemia, candida_data.filtered) %>% 
@@ -257,7 +257,7 @@ coxph.out %>%
   labs(x = "")
 ```
 
-## Table S2
+## Table S3
 
 ```{r}
 coxph.out %>% 
